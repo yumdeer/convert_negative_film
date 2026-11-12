@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="负片校正工具：自动识别片基色，在本地把扫描负片还原为正片，支持多图队列、滑块对比、参数导入导出与批量 ZIP 导出。图片不上传服务器。">
+  <title>负片校正（去色罩）- convert_negative_film</title>
+  <link rel="stylesheet" href="styles.css?v=1.0.7">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="https://flowerdeer.cn/tools/" aria-label="返回小工具列表">← 小工具</a>
+    <span class="title">负片校正 · 去色罩</span>
+    <span class="spacer"></span>
+    <a class="origin-note" href="https://lab.qingsiphotograph.com/intuitive-film/" target="_blank" rel="noopener noreferrer" title="处理思路参考 QingSi Lab 的「直观胶片」">参考来源 ↗</a>
+  </header>
+
+  <main class="layout">
+    <aside class="panel input-panel">
+      <div class="card">
+        <div class="card-head">
+          <h2>原始负片</h2>
+          <span id="input-tag" class="tag">未载入</span>
+        </div>
+        <div id="mini-drop" class="mini-drop" tabindex="0" role="button" aria-label="选择或拖入负片照片，支持 JPEG、PNG、WebP、TIFF、BMP、AVIF">
+          <span class="mini-drop-main">＋ 选择或拖入负片照片</span>
+          <span class="mini-drop-sub">支持 JPEG / PNG / WebP / TIFF / BMP / AVIF</span>
+        </div>
+        <div id="neg-preview" class="neg-preview" hidden>
+          <canvas id="neg-thumb"></canvas>
+        </div>
+        <p id="neg-file" class="neg-file">尚未载入图片</p>
+        <dl class="info-list" id="neg-info" hidden>
+          <div class="info-row"><dt>尺寸</dt><dd id="neg-size">—</dd></div>
+          <div class="info-row"><dt>预览</dt><dd id="neg-prev-size">—</dd></div>
+          <div class="info-row"><dt>输出</dt><dd id="neg-out-size">—</dd></div>
+          <div class="info-row"><dt>构图</dt><dd id="neg-crop-label">—</dd></div>
+        </dl>
+        <div class="card-actions">
+          <button id="btn-edit-comp" class="ghost-btn mini" type="button" disabled>编辑构图</button>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>片基取样</h2>
+          <span id="base-source" class="tag">默认值</span>
+        </div>
+        <div class="base-row">
+          <span id="base-swatch" class="base-swatch" aria-hidden="true"></span>
+          <span id="base-rgb" class="base-rgb">RGB 211, 122, 78</span>
+        </div>
+        <div class="card-actions">
+          <button id="btn-auto-base" class="ghost-btn" disabled>自动识别</button>
+          <button id="btn-manual-base" class="ghost-btn" disabled>手动取样</button>
+        </div>
+        <p id="base-message" class="card-note">载入图片后自动识别画面边缘的未曝光片基。</p>
+        <label class="split-row">采样半径
+          <input type="range" id="sample-radius" min="4" max="32" step="1" value="12" disabled aria-label="手动采样半径">
+          <span id="sample-radius-value" class="value">12 px</span>
+        </label>
+        <p class="card-note">开启手动取样后，点击画面中未曝光的片基区域可覆盖自动识别结果。</p>
+        <dl class="info-list" id="base-stats" hidden>
+          <div class="info-row"><dt>置信度</dt><dd id="base-confidence">—</dd></div>
+          <div class="info-row"><dt>范围</dt><dd id="base-range">—</dd></div>
+        </dl>
+      </div>
+    </aside>
+    <section class="stage">
+      <div class="stage-inner">
+        <div id="drop-zone" class="drop-zone" tabindex="0" role="button" aria-label="选择或拖入负片扫描图">
+          <div class="drop-hint">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4.5" width="18" height="15" rx="1.5"></rect>
+              <path d="M7.2 4.5v15M16.8 4.5v15"></path>
+              <path d="M4.6 7.2h1.2M4.6 10h1.2M4.6 12.8h1.2M4.6 15.6h1.2M4.6 17.9h1.2M18.2 7.2h1.2M18.2 10h1.2M18.2 12.8h1.2M18.2 15.6h1.2M18.2 17.9h1.2"></path>
+              <path d="M10.4 13.6V9.8l3 1.9-3 1.9z" fill="currentColor" stroke="none"></path>
+            </svg>
+            <p class="drop-main">点击选择，或拖入负片扫描图</p>
+            <p class="drop-sub">支持 JPEG / PNG / WebP / TIFF / BMP / AVIF，可多选（最多 12 张），全部在本机处理</p>
+          </div>
+          <input type="file" id="file-input" accept="image/jpeg,image/png,image/webp,image/tiff,image/bmp,image/avif,image/*,.tif,.tiff" multiple hidden>
+        </div>
+        <div id="canvas-wrap" class="canvas-wrap" hidden>
+          <canvas id="canvas"></canvas>
+          <div id="sample-badge" class="sample-badge" hidden>点击画面中未曝光的片基区域</div>
+          <div id="compare-overlay" class="compare-overlay" hidden>
+            <canvas id="compare-before"></canvas>
+            <span class="compare-tag">简单反转</span>
+            <span class="compare-tag compare-tag-after">片基校正</span>
+            <div id="compare-divider" class="compare-divider"><span class="compare-handle"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#1c1b18" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5"></path></svg></span></div>
+          </div>
+          <div id="crop-overlay" class="crop-overlay" hidden>
+            <div id="crop-box" class="crop-box" data-handle="move">
+              <span class="crop-handle" data-handle="nw"></span>
+              <span class="crop-handle" data-handle="ne"></span>
+              <span class="crop-handle" data-handle="sw"></span>
+              <span class="crop-handle" data-handle="se"></span>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="tone-hint" class="tone-hint" hidden>
+        <span id="tone-text" class="tone-text"></span>
+        <span class="tone-actions">
+          <button id="btn-tone-toggle" class="ghost-btn mini" type="button">按正片处理</button>
+          <button id="btn-tone-ignore" class="ghost-btn mini" type="button">忽略</button>
+        </span>
+      </div>
+      <div id="crop-bar" class="crop-bar" hidden>
+        <span class="crop-label">裁剪</span>
+        <select id="crop-ratio" class="format-select" aria-label="裁剪比例">
+          <option value="0">自由</option>
+          <option value="1">1:1</option>
+          <option value="1.3333">4:3</option>
+          <option value="1.5">3:2</option>
+          <option value="1.7778">16:9</option>
+        </select>
+        <button id="btn-crop-apply" class="ghost-btn mini" type="button">应用</button>
+        <button id="btn-crop-cancel" class="ghost-btn mini" type="button">取消</button>
+        <button id="btn-crop-reset" class="ghost-btn mini" type="button">取消裁剪</button>
+        <span class="crop-tip">拖动四角调整范围，框内可整体移动</span>
+      </div>
+      <div id="queue-bar" class="queue-bar" hidden></div>
+      <div class="stage-bar">
+        <span id="status" class="status">等待载入图片</span>
+        <span class="stage-actions">
+          <button id="btn-compare" class="ghost-btn" disabled>按住查看原片</button>
+          <button id="btn-compare-split" class="ghost-btn" disabled>对比模式</button>
+          <button id="btn-zoom" class="ghost-btn" disabled>查看大图</button>
+          <button id="btn-reset" class="ghost-btn" disabled>重置参数</button>
+          <button id="btn-crop" class="ghost-btn" disabled>裁剪</button>
+          <select id="export-format" class="format-select" aria-label="导出格式" disabled>
+            <option value="jpeg">JPEG</option>
+            <option value="png">PNG</option>
+            <option value="webp">WebP</option>
+            <option value="tiff">TIFF</option>
+            <option value="original">原图格式</option>
+          </select>
+          <button id="btn-export-zip" class="ghost-btn" disabled>导出全部 ZIP</button>
+          <button id="btn-export" class="primary-btn" disabled>导出</button>
+        </span>
+      </div>
+    </section>
+
+    <aside class="panel side-panel">
+
+      <div class="card">
+        <div class="card-head">
+          <h2>调整</h2>
+          <span class="card-note-inline" id="adj-note">双击滑块可复位</span>
+        </div>
+        <div id="sliders" class="sliders"></div>
+        <div class="card-actions params-actions">
+          <button id="btn-export-params" class="ghost-btn" disabled>导出参数</button>
+          <button id="btn-import-params" class="ghost-btn" disabled>导入参数</button>
+          <button id="btn-reset-adj" class="ghost-btn" disabled>重置参数</button>
+        </div>
+        <input type="file" id="params-input" accept=".json,application/json" hidden>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <h2>待处理队列</h2>
+          <span class="card-note-inline"><span id="queue-count">0</span>/12 · 已编辑 <span id="queue-edited">0</span></span>
+        </div>
+        <p class="card-note">选择一张图片进行编辑，「导出」仅作用于选中图片；批量导出按下方输出方式执行。</p>
+        <div class="batch-grid">
+          <button id="btn-apply-adj-all" class="ghost-btn" disabled>调色到全部</button>
+          <button id="btn-apply-adj-unproc" class="ghost-btn" disabled>调色到未处理</button>
+          <button id="btn-apply-base-all" class="ghost-btn" disabled>片基到全部</button>
+          <button id="btn-apply-base-unproc" class="ghost-btn" disabled>片基到未处理</button>
+          <button id="btn-import-params-queue" class="ghost-btn" disabled>队列导入参数</button>
+          <button id="btn-reset-all" class="ghost-btn" disabled>重置全部参数</button>
+        </div>
+        <fieldset class="output-mode">
+          <legend>输出方式</legend>
+          <label class="om-row"><input type="radio" name="output-mode" value="folder" checked>保存到文件夹<em>推荐，低内存</em></label>
+          <label class="om-row"><input type="radio" name="output-mode" value="split">自动分卷 ZIP<em>跨浏览器</em></label>
+          <label class="om-row"><input type="radio" name="output-mode" value="single">单一 ZIP<em>兼容旧行为</em></label>
+        </fieldset>
+        <label class="split-row" id="zip-split-row" hidden>ZIP 分卷
+          <select id="zip-split" class="format-select" aria-label="ZIP 分卷大小">
+            <option value="500">500 MB / 卷</option>
+            <option value="1000">1 GB / 卷</option>
+            <option value="2000">2 GB / 卷</option>
+          </select>
+        </label>
+        <div class="card-actions">
+          <button id="btn-export-dir" class="primary-btn" disabled>保存到文件夹</button>
+          <button id="btn-export-zip" class="primary-btn" hidden disabled>导出全部 ZIP</button>
+        </div>
+      </div>
+    </aside>
+  </main>
+
+  <div id="lightbox" class="lightbox" hidden>
+    <div class="lightbox-head">
+      <span id="lightbox-title"></span>
+      <button id="btn-lightbox-close" class="ghost-btn mini" type="button">关闭</button>
+    </div>
+    <div class="lightbox-body"><canvas id="lightbox-canvas"></canvas></div>
+  </div>
+
+  <script src="lib/pako.min.js"></script>
+  <script src="lib/UTIF.js"></script>
+  <script src="lib/jszip.min.js"></script>
+  <script src="app.js?v=1.0.8"></script>
+</body>
+</html>
